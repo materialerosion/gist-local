@@ -1,1 +1,5 @@
 streamlit
+openai
+biopython
+openpyxl
+pandas
