@@ -17,15 +17,16 @@ st.set_page_config(
 
 # Sidebar for Inputs
 st.sidebar.header("PubMed Search Parameters")
-query = st.sidebar.text_input("Search Query", "GIST")
-max_results = st.sidebar.number_input("Max Results", min_value=1, max_value=500, value=100, step=10)
+query = st.sidebar.text_input("Search Query", "loratadine and (clinicaltrial[filter])")
+max_results = st.sidebar.number_input("Max Results", min_value=1, max_value=400, value=20, step=1)
 
 # Configure NCBI Search
 Entrez.email = st.secrets["ncbi_email"]  # Use Streamlit secrets
 Entrez.api_key = st.secrets["PM_Key"]  # Use Streamlit secrets
 
 # Configure file name
-filename = f"GIST Results {time.strftime('%y%m%d')}.xlsx"
+query_word = query.split()[0]  # Extract the first word from the query
+filename = f"GIST Results {query_word} {time.strftime('%y%m%d')}.xlsx"
 
 # State Management
 if 'analysis_results' not in st.session_state:
