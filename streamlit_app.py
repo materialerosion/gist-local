@@ -6,6 +6,7 @@ import os
 from openai import OpenAI
 from datetime import datetime
 from Bio import Entrez
+import requests
 
 # Streamlit UI Configuration
 st.set_page_config(
@@ -17,7 +18,7 @@ st.set_page_config(
 
 # Sidebar for Inputs
 st.sidebar.header("PubMed Search Parameters")
-query = st.sidebar.text_input("Search Query", "loratadine and (clinicaltrial[filter])")
+query = st.sidebar.text_input("Search Query", "loratadine AND (clinicaltrial[filter])")
 max_results = st.sidebar.number_input("Max Results", min_value=1, max_value=400, value=20, step=1)
 
 # Configure NCBI Search
@@ -26,7 +27,7 @@ Entrez.api_key = st.secrets["PM_Key"]  # Use Streamlit secrets
 
 # Configure file name
 query_word = query.split()[0]  # Extract the first word from the query
-filename = f"GIST Results {query_word} {time.strftime('%y%m%d')}.xlsx"
+filename = f"Results {query_word} {time.strftime('%y%m%d')}.xlsx"
 
 # State Management
 if 'analysis_results' not in st.session_state:
@@ -37,13 +38,44 @@ if 'total_papers' not in st.session_state:
     st.session_state['total_papers'] = 0
 if 'search_completed' not in st.session_state:
     st.session_state['search_completed'] = False
+if 'openai_api_key' not in st.session_state:
+    st.session_state['openai_api_key'] = None  # Initialize the API key
+if 'api_key_valid' not in st.session_state:
+    st.session_state['api_key_valid'] = False
+
+# OpenAI API Key Input in Sidebar
+with st.sidebar:
+    openai_api_key = st.text_input("OpenAI API Key", type="password")
+
+    if openai_api_key:
+        st.session_state['openai_api_key'] = openai_api_key
+
+        # Validate API Key
+        try:
+            headers = {
+                'accept': 'application/json',
+                'x-baychatgpt-accesstoken': openai_api_key
+            }
+            response = requests.get('https://chat.int.bayer.com/api/v2/users/me', headers=headers)
+            response.raise_for_status()  # Raise HTTPError for bad responses (4xx or 5xx)
+            st.session_state['api_key_valid'] = True
+            st.success("API Key Validated! :white_check_mark:")
+        except requests.exceptions.RequestException as e:
+            st.error(f"API Key Invalid: {e}")
+            st.session_state['api_key_valid'] = False
+
+    elif st.session_state['openai_api_key'] is None:
+        st.info("Please add your OpenAI API key to continue.", icon="🗝️")
+
+    # Disable the Start Analysis button if the API key is not provided or invalid
+    start_analysis_disabled = not (st.session_state['openai_api_key'] and st.session_state['api_key_valid'])
 
 # Functions
 def search_and_fetch_pubmed(query, max_results):
     """Search PubMed and fetch details in one function."""
     with Entrez.esearch(db="pubmed", term=query, retmax=max_results) as handle:
         record = Entrez.read(handle)
-    
+
     id_list = record["IdList"]
     print(id_list)
     if not id_list:
@@ -52,7 +84,7 @@ def search_and_fetch_pubmed(query, max_results):
     ids = ','.join(id_list)
     with Entrez.efetch(db="pubmed", id=ids, retmode="xml") as handle:
         records = Entrez.read(handle)
-    
+
     return records
 
 def add_to_excel(output_list, excel_file_path):
@@ -61,23 +93,23 @@ def add_to_excel(output_list, excel_file_path):
     df.to_excel(excel_file_path, index=False)
     return excel_file_path  # Return the file path
 
-def analyze_paper(paper):
+def analyze_paper(paper, openai_api_key):  # Pass the API key to the function
     """Call OpenAI to analyze the paper and return the results."""
-    client = OpenAI(api_key=st.secrets["MGA_Key"], base_url="https://chat.int.bayer.com/api/v1")
-    
+    client = OpenAI(api_key=openai_api_key, base_url="https://chat.int.bayer.com/api/v1")
+
     conversation = client.chat.completions.create(
-        model='gpt-4o-mini',#gpt-4-turbo
+        model='gpt-4o-mini',  # gpt-4-turbo
         messages=[
             {
                 "role": "system",
                 "content": """
                 You are a bot speaking with another program that takes JSON formatted text as an input. Only return results in JSON format, with NO PREAMBLE.
-                The user will input the results from a PubMed search. Your job is to extract the exact information to return:              
+                The user will input the results from a PubMed search. Your job is to extract the exact information to return:
                   'Title': The complete article title
                   'PMID': The Pubmed ID of the article
                   'Full Text Link' : If available, the DOI URL, otherwise, NA
                   'Subject of Study': The type of subject in the study. Human, Animal, In-Vitro, Other
-                  'Disease State': Disease state studied, if any, or if the study is done on a healthy population. leave blank if disease state or healthy patients is not mentioned explicitly. 
+                  'Disease State': Disease state studied, if any, or if the study is done on a healthy population. leave blank if disease state or healthy patients is not mentioned explicitly.
                   'Number of Subjects Studied': If human, the total study population. Otherwise, leave blank. This field needs to be an integer or empty.
                   'Type of Study': Type of study done. Can be '3. RCT' for randomized controlled trial, '1. Meta-analysis','2. Systematic Review','4. Cohort Study', or '5. Other'. If it is '5. Other', append a short description
                   'Study Design': Brief and succinct details about study design, if applicable
@@ -106,13 +138,13 @@ def analyze_paper(paper):
             }
         ]
     )
-    
+
     cleaned_str = conversation.choices[0].message.content.replace("```json", "").replace("```", "").strip()
     print(conversation)
     return json.loads(cleaned_str)
 
 # Main Execution
-if st.sidebar.button("Start Analysis"):
+if st.sidebar.button("Start Analysis", disabled=start_analysis_disabled):
     st.session_state['analysis_results'] = []  # Reset results
     st.session_state['progress'] = 0
     st.session_state['search_completed'] = False
@@ -127,11 +159,11 @@ if st.sidebar.button("Start Analysis"):
     for i, paper in enumerate(papers['PubmedArticle']):
         try:
             with st.spinner(f"Analyzing paper {i+1}/{st.session_state['total_papers']}..."):
-                result = analyze_paper(paper)
+                result = analyze_paper(paper, st.session_state['openai_api_key'])  # Pass the API key
                 st.session_state['analysis_results'].append(result)
         except Exception as e:
             st.error(f"Error analyzing paper {i+1}: {e}")
-        
+
         st.session_state['progress'] = (i + 1) / st.session_state['total_papers']
         progress_bar.progress(st.session_state['progress'])
 
@@ -148,10 +180,10 @@ if st.session_state['search_completed']:
         for col in df.columns:
             if df[col].dtype == 'object':  # Check if the column is of object type (likely contains mixed types)
                 try:
-                    df[col] = df[col].astype(str) #try to convert to string
+                    df[col] = df[col].astype(str)  # try to convert to string
                 except:
-                    print (f"can't convert {col}") #if it fails for some reason, print it to the log
-                    pass #and continue
+                    print(f"can't convert {col}")  # if it fails for some reason, print it to the log
+                    pass  # and continue
 
         st.dataframe(df)
 
