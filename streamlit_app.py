@@ -18,7 +18,7 @@ st.set_page_config(
 
 # Sidebar for Inputs
 st.sidebar.header("PubMed Search Parameters")
-query = st.sidebar.text_input("Search Query", "loratadine AND (clinicaltrial[filter])")
+query = st.sidebar.text_input("Search Query", "loratadine)") + " AND (clinicaltrial[filter]"
 max_results = st.sidebar.number_input("Max Results", min_value=1, max_value=400, value=20, step=1)
 
 # Configure NCBI Search
