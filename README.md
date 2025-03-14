@@ -82,10 +82,9 @@ This Streamlit application allows you to search PubMed for relevant research art
 1.  **Run the Streamlit application:**
 
     ```bash
-    streamlit run your_script_name.py
+    streamlit run streamlit_app.py
     ```
 
-    Replace `your_script_name.py` with the actual name of your Python script (e.g., `pubmed_analysis.py`).
 
 2.  **Enter Search Parameters:**
 
