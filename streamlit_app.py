@@ -541,9 +541,6 @@ st.markdown("""
     font-size: 14px;
 }
 </style>
-<div class="footer">
-    Clinical Research Analysis Tool - Combines PubMed search and PDF analysis capabilities
-</div>
 """, unsafe_allow_html=True)
 
 # Hide Streamlit branding
