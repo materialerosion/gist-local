@@ -1,0 +1,2 @@
+- name: Make run.sh executable
+  run: chmod +x run.sh
