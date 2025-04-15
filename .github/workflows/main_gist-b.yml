@@ -34,6 +34,14 @@ jobs:
         
       - name: Make run.sh executable
         run: chmod +x run.sh     
+
+      - name: Set up Streamlit secrets
+        run: |
+          mkdir -p .streamlit
+          cat > .streamlit/secrets.toml << 'EOL'
+          ncbi_email = "${{ secrets.NCBI_EMAIL }}"
+          PM_Key = "${{ secrets.PM_KEY }}"
+          EOL
         
         # Optional: Add step to run tests here (PyTest, Django test suites, etc.)
 
