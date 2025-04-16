@@ -169,7 +169,7 @@ def add_to_excel(output_list, excel_file_path):
 
 def analyze_paper(paper, openai_api_key, is_pdf=False):
     """Call OpenAI to analyze the paper and return the results."""
-    client = OpenAI(api_key=openai_api_key, base_url="https://chat.int.bayer.com/api/v1")
+    client = OpenAI(api_key=openai_api_key, base_url="https://chat.int.bayer.com/api/v2")
 
     system_prompt = """
     You are a bot speaking with another program that takes JSON formatted text as an input. Only return results in JSON format, with NO PREAMBLE.
