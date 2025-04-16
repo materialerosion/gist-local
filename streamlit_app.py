@@ -32,35 +32,6 @@ def convert_pdf_to_txt_file(pdf_file):
         text += page.extract_text() + "\n\n"
     return text, len(pdf_reader.pages)
 
-def convert_pdf_to_txt_pages(pdf_file):
-    """Convert PDF to multiple text pages"""
-    import PyPDF2
-    pdf_reader = PyPDF2.PdfReader(pdf_file)
-    text_pages = []
-    for page in pdf_reader.pages:
-        text_pages.append(page.extract_text())
-    return text_pages, len(pdf_reader.pages)
-
-def save_pages(text_data):
-    """Save text pages to a ZIP file"""
-    zip_path = "pdf_to_txt.zip"
-    with zipfile.ZipFile(zip_path, 'w') as zipf:
-        for i, text in enumerate(text_data):
-            zipf.writestr(f"page_{i+1}.txt", text)
-    return zip_path
-
-def displayPDF(file):
-    """Display PDF in Streamlit"""
-    # Create a temporary PDF file
-    with open("temp.pdf", "wb") as f:
-        f.write(file)
-    
-    # Display the PDF using an iframe
-    pdf_display = f"""
-        <iframe src="temp.pdf" width="700" height="1000" type="application/pdf"></iframe>
-    """
-    st.markdown(pdf_display, unsafe_allow_html=True)
-
 def images_to_txt(pdf_file, lang='eng'):
     """Convert PDF to text using OCR"""
     images = pdf2image.convert_from_bytes(pdf_file)
