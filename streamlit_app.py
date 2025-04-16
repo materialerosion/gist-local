@@ -178,9 +178,9 @@ def analyze_paper(paper, openai_api_key, is_pdf=False):
       'PMID': The Pubmed ID of the article (if available, otherwise 'NA')
       'Full Text Link' : If available, the DOI URL, otherwise, NA
       'Subject of Study': The type of subject in the study. Human, Animal, In-Vitro, Other
-      'Disease State': Disease state studied, if any, or if the study is done on a healthy population. leave blank if disease state or healthy patients is not mentioned explicitly.
+      'Disease State': Disease state studied, if any, or if the study is done on a healthy population. leave blank if disease state or healthy patients is not mentioned explicitly. "Healthy patients" if patients are explicitly mentioned to be healthy.
       'Number of Subjects Studied': If human, the total study population. Otherwise, leave blank. This field needs to be an integer or empty.
-      'Type of Study': Type of study done. Can be '3. RCT' for randomized controlled trial, '1. Meta-analysis','2. Systematic Review','4. Cohort Study', or '5. Other'. If it is '5. Other', append a short description
+      'Type of Study': Type of study done. 'RCT' for randomized controlled trial, '1. Meta-analysis','2. Systematic Review','3. Cohort Study', or '4. Other'. If it is '5. Other', append a short description
       'Study Design': Brief and succinct details about study design, if applicable
       'Intervention': Intervention(s) studied, if any. Intervention is the treatment applied to the group.
       'Intervention Dose': Go in detail here about the intervention's doses and treatment duration if available.
