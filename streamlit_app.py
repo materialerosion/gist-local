@@ -13,6 +13,8 @@ import pdf2image
 from PIL import Image
 import pytesseract
 from pytesseract import Output, TesseractError
+import msal
+import requests
 
 # Streamlit UI Configuration
 st.set_page_config(
@@ -21,6 +23,50 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+# Azure AD OAuth Configuration (place this right after st.set_page_config)
+CLIENT_ID = st.secrets["azure"]["client_id"]
+TENANT_ID = st.secrets["azure"]["tenant_id"]
+CLIENT_SECRET = st.secrets["azure"]["client_secret"]
+REDIRECT_URI = st.secrets["azure"]["redirect_uri"]
+SCOPE = ["User.Read"]
+AUTHORITY = f"https://login.microsoftonline.com/{TENANT_ID}"
+
+# Azure Authentication Check
+if 'azure_auth' not in st.session_state:
+    app = msal.ConfidentialClientApplication(
+        CLIENT_ID,
+        authority=AUTHORITY,
+        client_credential=CLIENT_SECRET
+    )
+    
+    query_params = st.experimental_get_query_params()
+    if 'code' in query_params:
+        result = app.acquire_token_by_authorization_code(
+            query_params['code'][0],
+            scopes=SCOPE,
+            redirect_uri=REDIRECT_URI
+        )
+        if 'access_token' in result:
+            # Validate token with Microsoft Graph
+            headers = {'Authorization': f'Bearer {result["access_token"]}'}
+            user_info = requests.get('https://graph.microsoft.com/v1.0/me', headers=headers)
+            if user_info.status_code == 200:
+                st.session_state.azure_auth = True
+                st.session_state.user_info = user_info.json()
+                st.experimental_set_query_params()
+            else:
+                st.error("Authentication validation failed")
+                st.stop()
+        else:
+            st.error("Authentication failed: " + result.get("error_description", "Unknown error"))
+            st.stop()
+    else:
+        auth_url = app.get_authorization_request_url(SCOPE, redirect_uri=REDIRECT_URI)
+        js = f"window.location.href = '{auth_url}'"
+        st.components.v1.html(f"<script>{js}</script>", height=0)
+        st.stop()
+
 
 # Helper functions for PDF processing
 def convert_pdf_to_txt_file(pdf_file):
