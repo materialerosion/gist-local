@@ -40,33 +40,41 @@ if 'azure_auth' not in st.session_state:
         client_credential=CLIENT_SECRET
     )
     
-    query_params = st.experimental_get_query_params()
+    query_params = st.query_params
     if 'code' in query_params:
-        result = app.acquire_token_by_authorization_code(
-            query_params['code'][0],
-            scopes=SCOPE,
-            redirect_uri=REDIRECT_URI
-        )
-        if 'access_token' in result:
-            # Validate token with Microsoft Graph
-            headers = {'Authorization': f'Bearer {result["access_token"]}'}
-            user_info = requests.get('https://graph.microsoft.com/v1.0/me', headers=headers)
-            if user_info.status_code == 200:
-                st.session_state.azure_auth = True
-                st.session_state.user_info = user_info.json()
-                st.experimental_set_query_params()
+        try:
+            result = app.acquire_token_by_authorization_code(
+                query_params['code'][0],
+                scopes=SCOPE,
+                redirect_uri=REDIRECT_URI
+            )
+            
+            if 'access_token' in result:
+                # Validate token with Microsoft Graph
+                headers = {'Authorization': f'Bearer {result["access_token"]}'}
+                user_info = requests.get('https://graph.microsoft.com/v1.0/me', headers=headers)
+                
+                if user_info.status_code == 200:
+                    st.session_state.azure_auth = True
+                    st.session_state.user_info = user_info.json()
+                    # Clear the code parameter from URL
+                    st.experimental_set_query_params()
+                else:
+                    st.error("Authentication validation failed")
+                    st.stop()
             else:
-                st.error("Authentication validation failed")
+                st.error(f"Authentication failed: {result.get('error_description', 'Unknown error')}")
                 st.stop()
-        else:
-            st.error("Authentication failed: " + result.get("error_description", "Unknown error"))
+                
+        except Exception as e:
+            st.error(f"Authentication error: {str(e)}")
             st.stop()
     else:
+        # Initiate auth flow if not authenticated
         auth_url = app.get_authorization_request_url(SCOPE, redirect_uri=REDIRECT_URI)
         js = f"window.location.href = '{auth_url}'"
-        st.components.v1.html(f"<script>{js}</script>", height=0)
+        st.markdown(f"<script>{js}</script>", unsafe_allow_html=True)
         st.stop()
-
 
 # Helper functions for PDF processing
 def convert_pdf_to_txt_file(pdf_file):
@@ -134,14 +142,21 @@ tab_selection = st.sidebar.radio("Select Source", ["PubMed Search", "PDF Upload"
 
 # OpenAI API Key Input in Sidebar
 with st.sidebar:
-    # Only show the API key input if the key is not yet validated
-    if not st.session_state['api_key_valid']:
+    st.header("Clinical Research Analysis Tool")
+    
+    # Display user info from Azure AD
+    if 'user_info' in st.session_state:
+        st.markdown(f"**Logged in as:**  \n{st.session_state.user_info.get('displayName', 'Unknown')}")
+        st.markdown(f"**Email:**  \n{st.session_state.user_info.get('mail', 'Unknown')}")
+    
+    st.markdown("---")
+    
+    # Original OpenAI API Key Section (preserved)
+    if not st.session_state.get('api_key_valid', False):
         openai_api_key = st.text_input("OpenAI API Key", type="password")
 
         if openai_api_key:
-            st.session_state['openai_api_key'] = openai_api_key
-
-            # Validate API Key
+            # Original validation logic
             try:
                 headers = {
                     'accept': 'application/json',
@@ -151,14 +166,10 @@ with st.sidebar:
                 response.raise_for_status()
                 st.session_state['api_key_valid'] = True
                 st.success("API Key Validated! :white_check_mark:")
-            except requests.exceptions.RequestException as e:
+            except Exception as e:
                 st.error(f"API Key Invalid: {e}")
                 st.session_state['api_key_valid'] = False
-
-        elif st.session_state['openai_api_key'] is None:
-            st.info("Please add your OpenAI API key to continue.", icon="🗝️")
     else:
-        # If API key is already validated, show a success message instead of the input box
         st.success("API Key Authenticated ✓")
         if st.button("Change API Key"):
             st.session_state['api_key_valid'] = False
