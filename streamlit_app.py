@@ -16,7 +16,7 @@ from pytesseract import Output, TesseractError
 
 # Streamlit UI Configuration
 st.set_page_config(
-    page_title="Clinical Research Analysis Tool",
+    page_title="GIST",
     page_icon=":mag:",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -81,43 +81,50 @@ def reset_app_state():
     st.session_state['search_action'] = None
 
 # Sidebar for Inputs
-st.sidebar.header("Clinical Research Analysis Tool")
+st.sidebar.header("GIST - Generative Insights Summarization Tool")
 
 # Tab selection
 tab_selection = st.sidebar.radio("Select Source", ["PubMed Search", "PDF Upload"])
 
-# OpenAI API Key Input in Sidebar
+# OpenAI API Key Input in Sidebar - Now in background
 with st.sidebar:
-    # Only show the API key input if the key is not yet validated
+    # Try to authenticate in the background
     if not st.session_state['api_key_valid']:
-        openai_api_key = st.text_input("OpenAI API Key", type="password")
-
-        if openai_api_key:
+        try:
+            # Get API key from secrets
+            openai_api_key = st.secrets["MGA_Key"]
             st.session_state['openai_api_key'] = openai_api_key
 
-            # Validate API Key
-            try:
-                headers = {
-                    'accept': 'application/json',
-                    'x-baychatgpt-accesstoken': openai_api_key
-                }
-                response = requests.get('https://chat.int.bayer.com/api/v2/users/me', headers=headers)
-                response.raise_for_status()
-                st.session_state['api_key_valid'] = True
-                st.success("API Key Validated! :white_check_mark:")
-            except requests.exceptions.RequestException as e:
-                st.error(f"API Key Invalid: {e}")
-                st.session_state['api_key_valid'] = False
-
-        elif st.session_state['openai_api_key'] is None:
-            st.info("Please add your OpenAI API key to continue.", icon="🗝️")
-    else:
-        # If API key is already validated, show a success message instead of the input box
-        st.success("API Key Authenticated ✓")
-        if st.button("Change API Key"):
-            st.session_state['api_key_valid'] = False
-            st.session_state['openai_api_key'] = None
-            st.rerun()
+            # Validate API Key silently
+            headers = {
+                'accept': 'application/json',
+                'x-baychatgpt-accesstoken': openai_api_key
+            }
+            response = requests.get('https://chat.int.bayer.com/api/v2/users/me', headers=headers)
+            response.raise_for_status()
+            st.session_state['api_key_valid'] = True
+            # No success message displayed
+        except (KeyError, requests.exceptions.RequestException) as e:
+            # If there's an error, show the API key input
+            error_message = "API Key not found or invalid. Please enter manually:"
+            openai_api_key = st.text_input(error_message, type="password")
+            
+            if openai_api_key:
+                st.session_state['openai_api_key'] = openai_api_key
+                
+                # Validate manually entered API Key
+                try:
+                    headers = {
+                        'accept': 'application/json',
+                        'x-baychatgpt-accesstoken': openai_api_key
+                    }
+                    response = requests.get('https://chat.int.bayer.com/api/v2/users/me', headers=headers)
+                    response.raise_for_status()
+                    st.session_state['api_key_valid'] = True
+                    st.success("API Key Validated! :white_check_mark:")
+                except requests.exceptions.RequestException as e:
+                    st.error(f"API Key Invalid: {e}")
+                    st.session_state['api_key_valid'] = False
 
     # Disable the analysis buttons if the API key is not provided or invalid
     start_analysis_disabled = not (st.session_state['openai_api_key'] and st.session_state['api_key_valid'])
