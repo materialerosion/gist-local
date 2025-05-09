@@ -13,6 +13,11 @@ import pdf2image
 from PIL import Image
 import pytesseract
 from pytesseract import Output, TesseractError
+import re
+import openpyxl
+from openpyxl.styles import Font, Alignment
+from openpyxl.utils import get_column_letter
+from openpyxl.worksheet.table import Table, TableStyleInfo
 
 # Streamlit UI Configuration
 st.set_page_config(
@@ -50,6 +55,8 @@ if 'total_papers' not in st.session_state:
     st.session_state['total_papers'] = 0
 if 'search_completed' not in st.session_state:
     st.session_state['search_completed'] = False
+if 'no_results_found' not in st.session_state:
+    st.session_state['no_results_found'] = False
 if 'openai_api_key' not in st.session_state:
     st.session_state['openai_api_key'] = None
 if 'api_key_valid' not in st.session_state:
@@ -66,6 +73,10 @@ if 'show_new_search_dialog' not in st.session_state:
     st.session_state['show_new_search_dialog'] = False
 if 'search_action' not in st.session_state:
     st.session_state['search_action'] = None
+if 'full_text_status' not in st.session_state:
+    st.session_state['full_text_status'] = {}
+if 'full_query' not in st.session_state:
+    st.session_state['full_query'] = ""
 
 # Function to reset the app state
 def reset_app_state():
@@ -73,12 +84,15 @@ def reset_app_state():
     st.session_state['progress'] = 0
     st.session_state['total_papers'] = 0
     st.session_state['search_completed'] = False
+    st.session_state['no_results_found'] = False
     st.session_state['pdf_analysis_completed'] = False
     st.session_state['df'] = pd.DataFrame()
     st.session_state['pdf_texts'] = []
     st.session_state['show_clear_confirmation'] = False
     st.session_state['show_new_search_dialog'] = False
     st.session_state['search_action'] = None
+    st.session_state['full_text_status'] = {}
+    st.session_state['full_query'] = ""
 
 # Sidebar for Inputs
 st.sidebar.header("GIST - Generative Insights Summarization Tool")
@@ -168,13 +182,91 @@ def search_and_fetch_pubmed(query, max_results):
 
     return records
 
-def add_to_excel(output_list, excel_file_path):
-    """Add a list of dictionaries to an Excel sheet."""
+def add_to_excel(output_list, excel_file_path, full_query=""):
+    """Add a list of dictionaries to an Excel sheet with formatting."""
+    # Create a DataFrame
     df = pd.DataFrame(output_list)
-    df.to_excel(excel_file_path, index=False)
+    
+    # Define column widths (in Excel units)
+    column_widths = {
+        "Title": 40,
+        "PMID": 10,
+        "Full Text Link": 30,
+        "Analysis Source": 20,
+        "Subject of Study": 15,
+        "Disease State": 25,
+        "Number of Subjects Studied": 10,
+        "Type of Study": 20,
+        "Type of Study 2": 15,
+        "Study Design": 30,
+        "Intervention": 30,
+        "Intervention Dose": 30,
+        "Intervention Dosage Form": 20,
+        "Control": 25,
+        "Primary Endpoint": 35,
+        "Primary Endpoint Result": 35,
+        "Secondary Endpoints": 35,
+        "Safety Endpoints": 25,
+        "Results Available": 10,
+        "Primary Endpoint Met": 10,
+        "Statistical Significance": 25,
+        "Clinical Significance": 25,
+        "Main Author": 20,
+        "Other Authors": 40,
+        "Journal Name": 30,
+        "Date of Publication": 15,
+        "Error": 10,
+        "Filename": 25,
+        "Search Query": 50
+    }
+    
+    # Add the search query to each row if provided
+    if full_query:
+        df["Search Query"] = full_query
+    
+    # Save to Excel
+    df.to_excel(excel_file_path, index=False, engine='openpyxl')
+    
+    # Open the Excel file to format it
+    wb = openpyxl.load_workbook(excel_file_path)
+    ws = wb.active
+    
+    # Format headers
+    for cell in ws[1]:
+        cell.font = Font(bold=True)
+        cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+    
+    # Set column widths
+    for col_idx, column in enumerate(df.columns, 1):
+        col_letter = get_column_letter(col_idx)
+        if column in column_widths:
+            ws.column_dimensions[col_letter].width = column_widths[column]
+        else:
+            ws.column_dimensions[col_letter].width = 15  # Default width
+    
+    # Create a table with the data
+    table_ref = f"A1:{get_column_letter(len(df.columns))}{len(df)+1}"
+    tab = Table(displayName="ResultsTable", ref=table_ref)
+    
+    # Add a default style
+    style = TableStyleInfo(
+        name="TableStyleMedium9", 
+        showFirstColumn=False,
+        showLastColumn=False, 
+        showRowStripes=True, 
+        showColumnStripes=False
+    )
+    tab.tableStyleInfo = style
+    
+    # Add the table to the worksheet
+    ws.add_table(tab)
+    
+    # Save the formatted workbook
+    wb.save(excel_file_path)
+    
     return excel_file_path
 
-def analyze_paper(paper, openai_api_key, is_pdf=False):
+def analyze_paper(paper, openai_api_key, content_type="abstract"):
     """Call OpenAI to analyze the paper and return the results."""
     client = OpenAI(api_key=openai_api_key, base_url="https://chat.int.bayer.com/api/v2")
 
@@ -184,10 +276,12 @@ def analyze_paper(paper, openai_api_key, is_pdf=False):
       'Title': The complete article title
       'PMID': The Pubmed ID of the article (if available, otherwise 'NA')
       'Full Text Link' : If available, the DOI URL, otherwise, NA
+      'Analysis Source' : Abstract, Full Text, or PDF if explicitly stated
       'Subject of Study': The type of subject in the study. Human, Animal, In-Vitro, Other
       'Disease State': Disease state studied, if any, or if the study is done on a healthy population. leave blank if disease state or healthy patients is not mentioned explicitly. "Healthy patients" if patients are explicitly mentioned to be healthy.
       'Number of Subjects Studied': If human, the total study population. Otherwise, leave blank. This field needs to be an integer or empty.
       'Type of Study': Type of study done. 'RCT' for randomized controlled trial, '1. Meta-analysis','2. Systematic Review','3. Cohort Study', or '4. Other'. If it is '5. Other', append a short description
+      'Type of Study 2': Type of clinical study. Evaluate the endpoints - are they clinically relevant endpoints such as symptom relief, or mechanism of action in looking at biomarkers. Output "Clinical" or "MOA" for mechanism of action
       'Study Design': Brief and succinct details about study design, if applicable
       'Intervention': Intervention(s) studied, if any. Intervention is the treatment applied to the group.
       'Intervention Dose': Go in detail here about the intervention's doses and treatment duration if available.
@@ -208,9 +302,17 @@ def analyze_paper(paper, openai_api_key, is_pdf=False):
       'Error': Error description, if any. Otherwise, leave emtpy
     """
 
-    if is_pdf:
+    if content_type == "full_text":
+        system_prompt += """
+        Note: This is a full-text article. Extract as much detail as possible from the full text, focusing on detailed methodology, results, and statistical analyses.
+        """
+    elif content_type == "pdf":
         system_prompt += """
         Note: This is a full-text PDF of a clinical trial. Extract as much detail as possible from the full text.
+        """
+    elif content_type == "abstract":
+        system_prompt += """
+        Note: This is an abstract.
         """
 
     conversation = client.chat.completions.create(
@@ -230,17 +332,75 @@ def analyze_paper(paper, openai_api_key, is_pdf=False):
     cleaned_str = conversation.choices[0].message.content.replace("```json", "").replace("```", "").strip()
     return json.loads(cleaned_str)
 
+# Function to fetch full text from PubMed Central
+def fetch_full_text(pmid):
+    """Attempt to fetch full text from PubMed Central using the PMID."""
+    try:
+        # First, check if the article has a PMC ID
+        with Entrez.elink(dbfrom="pubmed", db="pmc", id=pmid) as handle:
+            link_results = Entrez.read(handle)
+        
+        if not link_results[0]["LinkSetDb"] or not link_results[0]["LinkSetDb"][0]["Link"]:
+            return None, "No PMC ID found"
+        
+        # Get the PMC ID
+        pmc_id = link_results[0]["LinkSetDb"][0]["Link"][0]["Id"]
+        
+        # Fetch the full text using the PMC ID
+        with Entrez.efetch(db="pmc", id=pmc_id, rettype="xml") as handle:
+            full_text_xml = handle.read()
+        
+        # Simple extraction of text from XML (could be improved with proper XML parsing)
+        # This is a simplified approach; a more robust XML parser would be better
+        text = re.sub(r'<[^>]+>', ' ', full_text_xml.decode('utf-8'))
+        text = re.sub(r'\s+', ' ', text).strip()
+        
+        return text, "Success"
+    
+    except Exception as e:
+        return None, f"Error fetching full text: {str(e)}"
+
+# Function to fetch full text from DOI
+def fetch_full_text_from_doi(doi):
+    """Attempt to fetch full text using DOI through open access APIs."""
+    try:
+        # Try Unpaywall API
+        response = requests.get(f"https://api.unpaywall.org/v2/{doi}?email={Entrez.email}")
+        if response.status_code == 200:
+            data = response.json()
+            if data.get("is_oa") and data.get("best_oa_location") and data.get("best_oa_location").get("url_for_pdf"):
+                pdf_url = data["best_oa_location"]["url_for_pdf"]
+                pdf_response = requests.get(pdf_url)
+                if pdf_response.status_code == 200:
+                    # Convert PDF to text
+                    pdf_content = io.BytesIO(pdf_response.content)
+                    text, _ = convert_pdf_to_txt_file(pdf_content)
+                    return text, "Success from DOI"
+        
+        return None, "Full text not available via DOI"
+    
+    except Exception as e:
+        return None, f"Error fetching from DOI: {str(e)}"
+
 # Function to perform PubMed search and analysis
 def perform_pubmed_analysis(query, max_results, action="new"):
+    # Store the full query for Excel output
+    st.session_state['full_query'] = query
+    
+    # Reset the no_results_found flag at the beginning of a new search
+    st.session_state['no_results_found'] = False
+    
     with st.spinner(f"Searching PubMed for '{query}'..."):
         papers = search_and_fetch_pubmed(query, max_results)
-        if 'PubmedArticle' in papers:
-            st.session_state['total_papers'] = len(papers['PubmedArticle'])
-            st.write(f"Found {st.session_state['total_papers']} papers.")
-        else:
+        if not papers or 'PubmedArticle' not in papers or not papers['PubmedArticle']:
             st.error("No papers found. Try a different search query.")
             st.session_state['total_papers'] = 0
+            st.session_state['no_results_found'] = True
+            st.session_state['search_completed'] = True  # Mark as completed but with no results
             return
+
+        st.session_state['total_papers'] = len(papers['PubmedArticle'])
+        st.write(f"Found {st.session_state['total_papers']} papers.")
 
     if st.session_state['total_papers'] > 0:
         progress_bar = st.progress(0)
@@ -248,12 +408,57 @@ def perform_pubmed_analysis(query, max_results, action="new"):
         # Initialize or append to results based on action
         if action == "new":
             st.session_state['analysis_results'] = []
+            st.session_state['full_text_status'] = {}
         
         for i, paper in enumerate(papers['PubmedArticle']):
             try:
                 with st.spinner(f"Analyzing paper {i+1}/{st.session_state['total_papers']}..."):
-                    result = analyze_paper(paper, st.session_state['openai_api_key'])
+                    # First analyze with abstract
+                    result = analyze_paper(paper, st.session_state['openai_api_key'], content_type="abstract")
+                    
+                    # Extract PMID and DOI for full text retrieval
+                    pmid = result.get('PMID', 'NA')
+                    doi_link = result.get('Full Text Link', 'NA')
+                    doi = doi_link.split('/')[-2] + '/' + doi_link.split('/')[-1] if 'doi.org' in doi_link else None
+                    
+                    # Add source information
+                    result['Analysis Source'] = "Abstract"
+                    
+                    # Store the result
                     st.session_state['analysis_results'].append(result)
+                    
+                    # Try to get full text
+                    full_text = None
+                    full_text_source = None
+                    
+                    # First try PMC
+                    if pmid != 'NA':
+                        full_text, status = fetch_full_text(pmid)
+                        if full_text:
+                            full_text_source = "PMC"
+                    
+                    # If PMC fails, try DOI
+                    if not full_text and doi:
+                        full_text, status = fetch_full_text_from_doi(doi)
+                        if full_text:
+                            full_text_source = "DOI"
+                    
+                    # If we got full text, analyze it and update the result
+                    if full_text:
+                        with st.spinner(f"Analyzing full text for paper {i+1}..."):
+                            full_result = analyze_paper(full_text, st.session_state['openai_api_key'], content_type="full_text")
+                            
+                            # Preserve the PMID and other identifiers
+                            full_result['PMID'] = pmid
+                            full_result['Full Text Link'] = doi_link
+                            full_result['Analysis Source'] = f"Full Text ({full_text_source})"
+                            
+                            # Replace the abstract-based result with the full text result
+                            st.session_state['analysis_results'][-1] = full_result
+                            st.session_state['full_text_status'][pmid] = "Analyzed"
+                    else:
+                        st.session_state['full_text_status'][pmid] = "Not Available"
+                
             except Exception as e:
                 st.error(f"Error analyzing paper {i+1}: {e}")
 
@@ -264,6 +469,15 @@ def perform_pubmed_analysis(query, max_results, action="new"):
 
 # Function to perform PDF analysis
 def perform_pdf_analysis(pdf_files, ocr_box=False, language_option="English", action="new"):
+    # Reset the no_results_found flag at the beginning of a new analysis
+    st.session_state['no_results_found'] = False
+    
+    if not pdf_files:
+        st.error("No PDF files uploaded. Please upload at least one PDF file.")
+        st.session_state['no_results_found'] = True
+        st.session_state['search_completed'] = True  # Mark as completed but with no results
+        return
+    
     languages = {
         'English': 'eng',
         'French': 'fra',
@@ -304,9 +518,10 @@ def perform_pdf_analysis(pdf_files, ocr_box=False, language_option="English", ac
                 
                 # Analyze the PDF content
                 with st.spinner(f"Analyzing content of {pdf_file.name}..."):
-                    result = analyze_paper(text_content, st.session_state['openai_api_key'], is_pdf=True)
-                    # Add filename to result
+                    result = analyze_paper(text_content, st.session_state['openai_api_key'], content_type="pdf")
+                    # Add filename and source to result
                     result['Filename'] = pdf_file.name
+                    result['Analysis Source'] = "PDF Full Text"
                     st.session_state['analysis_results'].append(result)
         
         except Exception as e:
@@ -410,12 +625,34 @@ if st.session_state['show_new_search_dialog']:
         if col3.button("Cancel", key="cancel_button"):
             st.session_state['show_new_search_dialog'] = False
             st.rerun()
+import time
+# Display Results and Download Button (common for both tabs)
+# Add a new session state variable for tracking the success message timing
+if 'success_message_time' not in st.session_state:
+    st.session_state['success_message_time'] = None
 
 # Display Results and Download Button (common for both tabs)
 if st.session_state['search_completed']:
-    st.success("Analysis Complete!")
-
+    if st.session_state['no_results_found']:
+        st.warning("No results found. Please try a different search query or upload different files.")
+    
+    # Always display the table if there are results, regardless of no_results_found flag
     if st.session_state['analysis_results']:
+        # Check if we should show the success message
+        current_time = time.time()
+        
+        if st.session_state['success_message_time'] is None:
+            # First time showing results, set the timer
+            st.session_state['success_message_time'] = current_time
+            st.success("Analysis Complete!")
+        elif current_time - st.session_state['success_message_time'] < 10:
+            # Less than 5 seconds have passed, still show the message
+            st.success("Analysis Complete!")
+        else:
+            # More than 5 seconds have passed, don't show the message
+            # No need to rerun
+            pass
+        
         df = pd.DataFrame(st.session_state['analysis_results'])
 
         # Convert lists to strings in problematic columns
@@ -452,6 +689,7 @@ if st.session_state['search_completed']:
         
         # File naming based on source
         if tab_selection == "PubMed Search":
+            query_word = query.split()[0] if query else "search"
             filename = f"PubMed_{query_word}_{time.strftime('%y%m%d')}.xlsx"
         else:
             filename = f"PDF_Analysis_{time.strftime('%y%m%d')}.xlsx"
@@ -459,9 +697,9 @@ if st.session_state['search_completed']:
         # Download buttons
         col1, col2 = st.columns(2)
         
-        # Download all results
+                # Download all results
         df_to_save = df.drop(columns=[" "])
-        excel_file_all = add_to_excel(df_to_save.to_dict('records'), filename)
+        excel_file_all = add_to_excel(df_to_save.to_dict('records'), filename, st.session_state.get('full_query', ''))
         with open(excel_file_all, "rb") as f:
             col1.download_button(
                 label="Download All Results",
@@ -475,7 +713,7 @@ if st.session_state['search_completed']:
             selected_filename = f"Selected_{time.strftime('%y%m%d')}.xlsx"
             selected_excel_file = f"Selected_{filename}"
             selected_df_to_save = selected_df.drop(columns=[" "])
-            selected_df_to_save.to_excel(selected_excel_file, index=False)
+            selected_excel_file = add_to_excel(selected_df_to_save.to_dict('records'), selected_excel_file, st.session_state.get('full_query', ''))
             
             with open(selected_excel_file, "rb") as f:
                 col2.download_button(
@@ -501,8 +739,6 @@ if st.session_state['search_completed']:
                     mime="text/plain",
                     key=f"download_text_{i}"
                 )
-    else:
-        st.info("No results to display.")
 
 # Footer with styling
 st.markdown("""
