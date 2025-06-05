@@ -32,22 +32,10 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
         
-      - name: Make run.sh executable
-        run: chmod +x run.sh     
-
-      - name: Set up Streamlit secrets
-        run: |
-          mkdir -p .streamlit
-          cat > .streamlit/secrets.toml << 'EOL'
-          ncbi_email = "${{ secrets.NCBI_EMAIL }}"
-          PM_Key = "${{ secrets.PM_KEY }}"
-          MGA_Key = "${{ secrets.MGA }}"
-          EOL
-        
-        # Optional: Add step to run tests here (PyTest, Django test suites, etc.)
+      # Optional: Add step to run tests here (PyTest, Django test suites, etc.)
 
       - name: Zip artifact for deployment
-        run: zip -r release.zip ./* ./.streamlit 
+        run: zip release.zip ./* -r
 
       - name: Upload artifact for deployment jobs
         uses: actions/upload-artifact@v4
@@ -80,9 +68,9 @@ jobs:
       - name: Login to Azure
         uses: azure/login@v2
         with:
-          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_2F292CC8215A4D1EAD882FA777DE6FD9 }}
-          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_5F3ECCA4BEF4465BB6FFBEF38533AE41 }}
-          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_38451768A3EF485E99252E624D242A97 }}
+          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_8204F3F3D60E4DB5A746E4F1CC7AEF94 }}
+          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_45CE1E5D940544CD8F8079F3077F6511 }}
+          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_2686088A39254320B2BE885CEFE1171B }}
 
       - name: 'Deploy to Azure Web App'
         uses: azure/webapps-deploy@v3
