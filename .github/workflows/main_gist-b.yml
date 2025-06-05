@@ -31,7 +31,18 @@ jobs:
       
       - name: Install dependencies
         run: pip install -r requirements.txt
-        
+
+      - name: Make run.sh executable
+        run: chmod +x run.sh     
+
+      - name: Set up Streamlit secrets
+        run: |
+          mkdir -p .streamlit
+          cat > .streamlit/secrets.toml << 'EOL'
+          ncbi_email = "${{ secrets.NCBI_EMAIL }}"
+          PM_Key = "${{ secrets.PM_KEY }}"
+          MGA_Key = "${{ secrets.MGA }}"
+          EOL
       # Optional: Add step to run tests here (PyTest, Django test suites, etc.)
 
       - name: Zip artifact for deployment
