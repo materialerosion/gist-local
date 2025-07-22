@@ -18,6 +18,7 @@ import openpyxl
 from openpyxl.styles import Font, Alignment
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.table import Table, TableStyleInfo
+import xml.etree.ElementTree as ET
 
 # Streamlit UI Configuration
 st.set_page_config(
@@ -334,29 +335,39 @@ def analyze_paper(paper, openai_api_key, content_type="abstract"):
 
 # Function to fetch full text from PubMed Central
 def fetch_full_text(pmid):
-    """Attempt to fetch full text from PubMed Central using the PMID."""
+    """Attempt to fetch full text from PubMed Central using the PMID, with PMC/PMID cross-check."""
     try:
         # First, check if the article has a PMC ID
         with Entrez.elink(dbfrom="pubmed", db="pmc", id=pmid) as handle:
             link_results = Entrez.read(handle)
-        
         if not link_results[0]["LinkSetDb"] or not link_results[0]["LinkSetDb"][0]["Link"]:
             return None, "No PMC ID found"
-        
         # Get the PMC ID
         pmc_id = link_results[0]["LinkSetDb"][0]["Link"][0]["Id"]
-        
         # Fetch the full text using the PMC ID
         with Entrez.efetch(db="pmc", id=pmc_id, rettype="xml") as handle:
             full_text_xml = handle.read()
-        
+        # Parse XML to extract PMID for cross-check
+        try:
+            root = ET.fromstring(full_text_xml)
+            # Try to find the PMID in the XML (common tag: article-id pub-id-type="pmid")
+            pmid_found = None
+            for elem in root.iter():
+                if elem.tag.endswith("article-id") and elem.attrib.get("pub-id-type") == "pmid":
+                    pmid_found = elem.text.strip()
+                    break
+            if pmid_found is not None and str(pmid_found) != str(pmid):
+                # Log a warning and skip
+                print(f"Warning: PMC ID {pmc_id} PMID {pmid_found} does not match queried PMID {pmid}. Skipping.")
+                return None, f"PMC PMID mismatch: {pmid_found} != {pmid}"
+        except Exception as e:
+            print(f"Warning: Could not parse PMC XML for PMID cross-check: {e}")
+            # If parsing fails, skip for safety
+            return None, "PMC XML parse error"
         # Simple extraction of text from XML (could be improved with proper XML parsing)
-        # This is a simplified approach; a more robust XML parser would be better
         text = re.sub(r'<[^>]+>', ' ', full_text_xml.decode('utf-8'))
         text = re.sub(r'\s+', ' ', text).strip()
-        
         return text, "Success"
-    
     except Exception as e:
         return None, f"Error fetching full text: {str(e)}"
 
@@ -538,7 +549,7 @@ if tab_selection == "PubMed Search":
     st.title("PubMed Clinical Trial Analysis")
     
     # PubMed search parameters
-    query = st.text_input("Search Query", "loratadine") + " AND (clinicaltrial[filter]"
+    query = st.text_input("Search Query", "loratadine") + " (clinicaltrial[filter])"
     max_results = st.number_input("Max Results", min_value=1, max_value=400, value=20, step=1)
     
     # Configure file name
