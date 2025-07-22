@@ -292,6 +292,7 @@ def analyze_paper(paper, openai_api_key, content_type="abstract"):
       'Primary Endpoint Result': The measurement for the primary endpoints
       'Secondary Endpoints' If available
       'Safety Endpoints' If available
+      'Safety Endpoints Results' Measurements for secondary endpoints, if available. 
       'Results Available': Yes or No
       'Primary Endpoint Met': Summarize from results whether or not the primary endpoint(s) was met: Yes or No or NA if results unavailable
       'Statistical Significance': alpha-level and p-value for primary endpoint(s), if available
