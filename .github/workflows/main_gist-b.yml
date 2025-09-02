@@ -82,4 +82,3 @@ jobs:
           app-name: 'gist-b'
           slot-name: 'Production'
           publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_D34BD631709545EBA0E24B60A3EDEA6B }}
-          startup-command: 'bash run.sh'
