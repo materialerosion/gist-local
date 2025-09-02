@@ -33,7 +33,7 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Make run.sh executable
-        run: chmod +x run.sh     
+        run: chmod +x run.sh
 
       - name: Set up Streamlit secrets
         run: |
@@ -45,15 +45,12 @@ jobs:
           EOL
       # Optional: Add step to run tests here (PyTest, Django test suites, etc.)
 
-      - name: Zip artifact for deployment
-        run: zip -r release.zip ./* ./.streamlit
-
       - name: Upload artifact for deployment jobs
         uses: actions/upload-artifact@v4
         with:
           name: python-app
           path: |
-            release.zip
+            .
             !venv/
 
   deploy:
@@ -82,7 +79,7 @@ jobs:
           client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_8204F3F3D60E4DB5A746E4F1CC7AEF94 }}
           tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_45CE1E5D940544CD8F8079F3077F6511 }}
           subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_2686088A39254320B2BE885CEFE1171B }}
-
+      
       - name: 'Deploy to Azure Web App'
         uses: azure/webapps-deploy@v3
         id: deploy-to-webapp
