@@ -75,14 +75,6 @@ jobs:
       - name: Unzip artifact for deployment
         run: unzip release.zip
 
-      
-      - name: Login to Azure
-        uses: azure/login@v2
-        with:
-          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_8204F3F3D60E4DB5A746E4F1CC7AEF94 }}
-          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_45CE1E5D940544CD8F8079F3077F6511 }}
-          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_2686088A39254320B2BE885CEFE1171B }}
-
       - name: 'Deploy to Azure Web App'
         uses: azure/webapps-deploy@v3
         id: deploy-to-webapp
@@ -90,3 +82,4 @@ jobs:
           app-name: 'gist-b'
           slot-name: 'Production'
           publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_D34BD631709545EBA0E24B60A3EDEA6B }}
+          startup-command: 'bash run.sh'
