@@ -9,10 +9,6 @@ from openai import OpenAI
 from datetime import datetime
 from Bio import Entrez
 import requests
-import pdf2image
-from PIL import Image
-import pytesseract
-from pytesseract import Output, TesseractError
 import re
 import openpyxl
 from openpyxl.styles import Font, Alignment
@@ -38,14 +34,6 @@ def convert_pdf_to_txt_file(pdf_file):
         text += page.extract_text() + "\n\n"
     return text, len(pdf_reader.pages)
 
-def images_to_txt(pdf_file, lang='eng'):
-    """Convert PDF to text using OCR"""
-    images = pdf2image.convert_from_bytes(pdf_file)
-    texts = []
-    for image in images:
-        text = pytesseract.image_to_string(image, lang=lang)
-        texts.append(text)
-    return texts, len(images)
 
 # State Management
 if 'analysis_results' not in st.session_state:
@@ -78,6 +66,8 @@ if 'full_text_status' not in st.session_state:
     st.session_state['full_text_status'] = {}
 if 'full_query' not in st.session_state:
     st.session_state['full_query'] = ""
+if 'unlimited_search' not in st.session_state:
+    st.session_state['unlimited_search'] = False
 
 # Function to reset the app state
 def reset_app_state():
@@ -94,6 +84,7 @@ def reset_app_state():
     st.session_state['search_action'] = None
     st.session_state['full_text_status'] = {}
     st.session_state['full_query'] = ""
+    st.session_state['unlimited_search'] = False
 
 # Sidebar for Inputs
 st.sidebar.header("GIST - Generative Insights Summarization Tool")
@@ -107,7 +98,7 @@ with st.sidebar:
     if not st.session_state['api_key_valid']:
         try:
             # Get API key from secrets
-            openai_api_key = st.secrets["MGA_Key"]
+            openai_api_key = st.secrets["MGA_key"]
             st.session_state['openai_api_key'] = openai_api_key
 
             # Validate API Key silently
@@ -119,9 +110,13 @@ with st.sidebar:
             response.raise_for_status()
             st.session_state['api_key_valid'] = True
             # No success message displayed
-        except (KeyError, requests.exceptions.RequestException) as e:
-            # If there's an error, show the API key input
-            error_message = "API Key not found or invalid. Please enter manually:"
+        except KeyError as e:
+            # If the key is not found in secrets
+            error_message = f"API Key 'MGA_key' not found in secrets. Please enter manually:"
+            openai_api_key = st.text_input(error_message, type="password")
+        except requests.exceptions.RequestException as e:
+            # If API validation fails
+            error_message = f"API Key validation failed: {str(e)}. Please enter a valid key:"
             openai_api_key = st.text_input(error_message, type="password")
             
             if openai_api_key:
@@ -168,6 +163,15 @@ if "PM_Key" in st.secrets:
     Entrez.api_key = st.secrets["PM_Key"]
 
 # Functions
+def get_pubmed_count(query):
+    """Get the total count of papers available in PubMed for a query."""
+    try:
+        with Entrez.esearch(db="pubmed", term=query, retmax=0) as handle:
+            record = Entrez.read(handle)
+        return int(record["Count"])
+    except Exception as e:
+        return None
+
 def search_and_fetch_pubmed(query, max_results):
     """Search PubMed and fetch details in one function."""
     with Entrez.esearch(db="pubmed", term=query, retmax=max_results) as handle:
@@ -480,7 +484,7 @@ def perform_pubmed_analysis(query, max_results, action="new"):
         st.session_state['search_completed'] = True
 
 # Function to perform PDF analysis
-def perform_pdf_analysis(pdf_files, ocr_box=False, language_option="English", action="new"):
+def perform_pdf_analysis(pdf_files, action="new"):
     # Reset the no_results_found flag at the beginning of a new analysis
     st.session_state['no_results_found'] = False
     
@@ -489,13 +493,6 @@ def perform_pdf_analysis(pdf_files, ocr_box=False, language_option="English", ac
         st.session_state['no_results_found'] = True
         st.session_state['search_completed'] = True  # Mark as completed but with no results
         return
-    
-    languages = {
-        'English': 'eng',
-        'French': 'fra',
-        'Arabic': 'ara',
-        'Spanish': 'spa',
-    }
     
     st.session_state['total_papers'] = len(pdf_files)
     progress_bar = st.progress(0)
@@ -513,14 +510,10 @@ def perform_pdf_analysis(pdf_files, ocr_box=False, language_option="English", ac
                 path = pdf_file.read()
                 
                 if file_extension == "pdf":
-                    if ocr_box:
-                        texts, _ = images_to_txt(path, languages[language_option])
-                        text_content = "\n\n".join(texts)
-                    else:
-                        text_content, _ = convert_pdf_to_txt_file(io.BytesIO(path))
-                else:  # Image files
-                    pil_image = Image.open(io.BytesIO(path))
-                    text_content = pytesseract.image_to_string(pil_image, lang=languages[language_option])
+                    text_content, _ = convert_pdf_to_txt_file(io.BytesIO(path))
+                else:
+                    st.error(f"Unsupported file type: {file_extension}. Only PDF files are supported.")
+                    continue
                 
                 # Store extracted text
                 st.session_state['pdf_texts'].append({
@@ -550,42 +543,60 @@ if tab_selection == "PubMed Search":
     st.title("PubMed Clinical Trial Analysis")
     
     # PubMed search parameters
-    query = st.text_input("Search Query", "loratadine") + " (clinicaltrial[filter])"
-    max_results = st.number_input("Max Results", min_value=1, max_value=400, value=20, step=1)
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        query = st.text_input("Search Query", "loratadine") + " (clinicaltrial[filter])"
+    with col2:
+        max_results = st.number_input("Max Results", min_value=1, max_value=400, value=2, step=1)
     
     # Configure file name
     query_word = query.split()[0]  # Extract the first word from the query
     filename = f"Results {query_word} {time.strftime('%y%m%d')}.xlsx"
     
-    # Start PubMed analysis button
-    if st.button("Start PubMed Analysis", disabled=start_analysis_disabled):
-        # Check if there are existing results
-        if st.session_state['analysis_results'] and len(st.session_state['analysis_results']) > 0:
-            st.session_state['show_new_search_dialog'] = True
-        else:
-            # No existing results, proceed with new search
-            perform_pubmed_analysis(query, max_results, action="new")
+    # Get paper count for both buttons
+    paper_count = get_pubmed_count(query)
+    if paper_count is not None:
+        unlimited_button_text = f"✨ GIST Analysis ({paper_count:,} results)"
+        unlimited_help_text = f"Retrieves all {paper_count:,} available results (no limit)"
+        
+        # For partial analysis, show the minimum of max_results and available papers
+        partial_count = min(max_results, paper_count)
+        partial_button_text = f"Partial Analysis ({partial_count:,})"
+        partial_help_text = f"Retrieves up to {partial_count:,} results (limited by max results setting)"
+    else:
+        unlimited_button_text = "✨ GIST Analysis"
+        unlimited_help_text = "Retrieves all available results (no limit)"
+        partial_button_text = "Partial Analysis"
+        partial_help_text = f"Retrieves up to {max_results} results (limited by max results setting)"
+    
+    # Start PubMed analysis buttons
+    col1, col2 = st.columns([3, 1])
+    
+    with col1:
+        if st.button(unlimited_button_text, disabled=start_analysis_disabled, help=unlimited_help_text):
+            # Check if there are existing results
+            if st.session_state['analysis_results'] and len(st.session_state['analysis_results']) > 0:
+                st.session_state['show_new_search_dialog'] = True
+                st.session_state['unlimited_search'] = True
+            else:
+                # No existing results, proceed with unlimited search
+                perform_pubmed_analysis(query, 10000, action="new")  # Use 10000 as "unlimited"
+       
+    with col2:
+        if st.button(partial_button_text, disabled=start_analysis_disabled, help=partial_help_text):
+            # Check if there are existing results
+            if st.session_state['analysis_results'] and len(st.session_state['analysis_results']) > 0:
+                st.session_state['show_new_search_dialog'] = True
+                st.session_state['unlimited_search'] = False
+            else:
+                # No existing results, proceed with new search
+                perform_pubmed_analysis(query, max_results, action="new")
 
 elif tab_selection == "PDF Upload":
     st.title("Clinical Trial PDF Analysis")
     
-    # PDF upload parameters
-    languages = {
-        'English': 'eng',
-        'French': 'fra',
-        'Arabic': 'ara',
-        'Spanish': 'spa',
-    }
-    
-    # OCR options
-    ocr_box = st.checkbox('Enable OCR (for scanned documents)')
-    if ocr_box:
-        language_option = st.selectbox('Select the document language', list(languages.keys()))
-    else:
-        language_option = "English"
-    
     # Multiple file uploader
-    pdf_files = st.file_uploader("Upload Clinical Trial PDF(s)", type=['pdf', 'png', 'jpg'], accept_multiple_files=True)
+    pdf_files = st.file_uploader("Upload Clinical Trial PDF(s)", type=['pdf'], accept_multiple_files=True)
     
     if pdf_files:
         st.write(f"Uploaded {len(pdf_files)} file(s)")
@@ -597,7 +608,7 @@ elif tab_selection == "PDF Upload":
                 st.session_state['show_new_search_dialog'] = True
             else:
                 # No existing results, proceed with new analysis
-                perform_pdf_analysis(pdf_files, ocr_box, language_option, action="new")
+                perform_pdf_analysis(pdf_files, action="new")
 
 # Show dialog for new search when results already exist
 if st.session_state['show_new_search_dialog']:
@@ -614,9 +625,10 @@ if st.session_state['show_new_search_dialog']:
             
             # Perform the appropriate action based on the selected tab
             if tab_selection == "PubMed Search":
-                perform_pubmed_analysis(query, max_results, action="new")
+                search_max_results = 10000 if st.session_state['unlimited_search'] else max_results
+                perform_pubmed_analysis(query, search_max_results, action="new")
             else:  # PDF Upload
-                perform_pdf_analysis(pdf_files, ocr_box, language_option, action="new")
+                perform_pdf_analysis(pdf_files, action="new")
             
             # Force a rerun to refresh the UI and close the dialog
             st.rerun()
@@ -627,9 +639,10 @@ if st.session_state['show_new_search_dialog']:
             
             # Perform the appropriate action based on the selected tab
             if tab_selection == "PubMed Search":
-                perform_pubmed_analysis(query, max_results, action="append")
+                search_max_results = 10000 if st.session_state['unlimited_search'] else max_results
+                perform_pubmed_analysis(query, search_max_results, action="append")
             else:  # PDF Upload
-                perform_pdf_analysis(pdf_files, ocr_box, language_option, action="append")
+                perform_pdf_analysis(pdf_files, action="append")
             
             # Force a rerun to refresh the UI and close the dialog
             st.rerun()

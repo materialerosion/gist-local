@@ -41,7 +41,7 @@ jobs:
           cat > .streamlit/secrets.toml << 'EOL'
           ncbi_email = "${{ secrets.NCBI_EMAIL }}"
           PM_Key = "${{ secrets.PM_KEY }}"
-          MGA_Key = "${{ secrets.MGA }}"
+          MGA_key = "${{ secrets.MGA }}"
           EOL
       # Optional: Add step to run tests here (PyTest, Django test suites, etc.)
 

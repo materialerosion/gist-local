@@ -167,3 +167,4 @@ cython_debug/
 #.idea/
 embase_test.py
 gist.md
+*.pdf
