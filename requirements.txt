@@ -7,3 +7,4 @@ PyPDF2==3.0.1
 openpyxl==3.1.2
 zipfile36==0.1.3
 msal
+tenacity==8.2.3

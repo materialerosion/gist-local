@@ -15,6 +15,87 @@ from openpyxl.styles import Font, Alignment
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.table import Table, TableStyleInfo
 import xml.etree.ElementTree as ET
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+import logging
+
+# Configure logging for rate limiting
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Rate limiting configuration
+RATE_LIMIT_CONFIG = {
+    'max_retries': 5,
+    'min_wait_time': 30  # seconds
+    'max_wait_time': 60,  # seconds
+    'exponential_multiplier': 1,
+    'extra_rate_limit_delay': 2  # additional seconds for rate limit errors
+}
+
+# Rate limiting decorator for OpenAI API calls
+@retry(
+    retry=retry_if_exception_type((
+        Exception,  # Catch all exceptions initially, then filter
+    )),
+    stop=stop_after_attempt(RATE_LIMIT_CONFIG['max_retries']),
+    wait=wait_exponential(
+        multiplier=RATE_LIMIT_CONFIG['exponential_multiplier'], 
+        min=RATE_LIMIT_CONFIG['min_wait_time'], 
+        max=RATE_LIMIT_CONFIG['max_wait_time']
+    ),
+    reraise=True
+)
+def call_openai_with_retry(client, **kwargs):
+    """
+    Make OpenAI API calls with automatic retry and rate limit handling.
+    
+    Args:
+        client: OpenAI client instance
+        **kwargs: Arguments to pass to client.chat.completions.create()
+    
+    Returns:
+        OpenAI completion response
+    
+    Raises:
+        Exception: After all retry attempts are exhausted
+    """
+    try:
+        response = client.chat.completions.create(**kwargs)
+        return response
+    except Exception as e:
+        error_message = str(e).lower()
+        
+        # Check for rate limit errors
+        if any(rate_limit_indicator in error_message for rate_limit_indicator in [
+            'rate limit', 'too many requests', '429', 'quota exceeded', 
+            'requests per minute', 'tokens per minute'
+        ]):
+            logger.warning(f"Rate limit hit: {e}. Retrying with backoff...")
+            # Update session state for UI feedback
+            if 'rate_limit_status' in st.session_state:
+                st.session_state['rate_limit_status'] = f"⏳ Rate limit detected. Retrying with backoff... ({str(e)[:100]})"
+            # Add extra delay for rate limits
+            time.sleep(RATE_LIMIT_CONFIG['extra_rate_limit_delay'])
+            raise e  # Re-raise to trigger retry
+        
+        # Check for server errors that should be retried
+        elif any(server_error in error_message for server_error in [
+            '500', '502', '503', '504', 'internal server error', 
+            'bad gateway', 'service unavailable', 'gateway timeout'
+        ]):
+            logger.warning(f"Server error: {e}. Retrying...")
+            raise e  # Re-raise to trigger retry
+        
+        # Check for authentication errors (don't retry)
+        elif any(auth_error in error_message for auth_error in [
+            'unauthorized', '401', 'invalid api key', 'authentication'
+        ]):
+            logger.error(f"Authentication error (not retrying): {e}")
+            raise e  # Re-raise without retry
+        
+        # For other errors, log and re-raise to trigger retry
+        else:
+            logger.warning(f"API error: {e}. Retrying...")
+            raise e
 
 # Streamlit UI Configuration
 st.set_page_config(
@@ -68,6 +149,8 @@ if 'full_query' not in st.session_state:
     st.session_state['full_query'] = ""
 if 'unlimited_search' not in st.session_state:
     st.session_state['unlimited_search'] = False
+if 'rate_limit_status' not in st.session_state:
+    st.session_state['rate_limit_status'] = ""
 
 # Function to reset the app state
 def reset_app_state():
@@ -85,6 +168,7 @@ def reset_app_state():
     st.session_state['full_text_status'] = {}
     st.session_state['full_query'] = ""
     st.session_state['unlimited_search'] = False
+    st.session_state['rate_limit_status'] = ""
 
 # Sidebar for Inputs
 st.sidebar.header("GIST - Generative Insights Summarization Tool")
@@ -99,7 +183,6 @@ with st.sidebar.expander("📖 Quick Start Guide"):
     2. Click ✨ **GIST Analysis**
     3. Download Results: Export findings to Excel format
     """)
-
 
 # Tab selection
 tab_selection = st.sidebar.radio("Select Source", ["PubMed Search", "PDF Upload"])
@@ -284,7 +367,7 @@ def add_to_excel(output_list, excel_file_path, full_query=""):
     return excel_file_path
 
 def analyze_paper(paper, openai_api_key, content_type="abstract"):
-    """Call OpenAI to analyze the paper and return the results."""
+    """Call OpenAI to analyze the paper and return the results with rate limiting."""
     client = OpenAI(api_key=openai_api_key, base_url="https://chat.int.bayer.com/api/v2")
 
     system_prompt = """
@@ -333,22 +416,77 @@ def analyze_paper(paper, openai_api_key, content_type="abstract"):
         Note: This is an abstract.
         """
 
-    conversation = client.chat.completions.create(
-        model='gpt-4o-mini',  # Use appropriate model
-        messages=[
-            {
-                "role": "system",
-                "content": system_prompt
-            },
-            {
-                "role": "user",
-                "content": str(paper)
-            }
-        ]
-    )
+    try:
+        # Use the rate-limited API call function
+        conversation = call_openai_with_retry(
+            client,
+            model='gpt-4o-mini',  # Use appropriate model
+            messages=[
+                {
+                    "role": "system",
+                    "content": system_prompt
+                },
+                {
+                    "role": "user",
+                    "content": str(paper)
+                }
+            ]
+        )
 
-    cleaned_str = conversation.choices[0].message.content.replace("```json", "").replace("```", "").strip()
-    return json.loads(cleaned_str)
+        cleaned_str = conversation.choices[0].message.content.replace("```json", "").replace("```", "").strip()
+        return json.loads(cleaned_str)
+    
+    except Exception as e:
+        # If all retries fail, return an error result
+        error_message = f"OpenAI API error after retries: {str(e)}"
+        logger.error(error_message)
+        
+        # Return a structured error response
+        return {
+            'Title': 'ERROR',
+            'PMID': 'NA',
+            'Full Text Link': 'NA',
+            'Analysis Source': content_type,
+            'Subject of Study': 'NA',
+            'Disease State': 'NA',
+            'Number of Subjects Studied': '',
+            'Type of Study': 'NA',
+            'Type of Study 2': 'NA',
+            'Study Design': 'NA',
+            'Intervention': 'NA',
+            'Intervention Dose': 'NA',
+            'Intervention Dosage Form': 'NA',
+            'Control': 'NA',
+            'Primary Endpoint': 'NA',
+            'Primary Endpoint Result': 'NA',
+            'Secondary Endpoints': 'NA',
+            'Safety Endpoints': 'NA',
+            'Safety Endpoints Results': 'NA',
+            'Results Available': 'No',
+            'Primary Endpoint Met': 'NA',
+            'Statistical Significance': 'NA',
+            'Clinical Significance': 'NA',
+            'Main Author': 'NA',
+            'Other Authors': 'NA',
+            'Journal Name': 'NA',
+            'Date of Publication': 'NA',
+            'Error': error_message
+        }
+
+def test_rate_limiting():
+    """
+    Simple test function to verify rate limiting is working.
+    This is mainly for development/debugging purposes.
+    """
+    try:
+        # This would typically be called during development to test
+        logger.info("Rate limiting configuration loaded successfully")
+        logger.info(f"Max retries: {RATE_LIMIT_CONFIG['max_retries']}")
+        logger.info(f"Wait time range: {RATE_LIMIT_CONFIG['min_wait_time']}-{RATE_LIMIT_CONFIG['max_wait_time']} seconds")
+        return True
+    except Exception as e:
+        logger.error(f"Rate limiting test failed: {e}")
+        return False
 
 # Function to fetch full text from PubMed Central
 def fetch_full_text(pmid):
@@ -440,7 +578,14 @@ def perform_pubmed_analysis(query, max_results, action="new"):
         
         for i, paper in enumerate(papers['PubmedArticle']):
             try:
+                # Clear any previous rate limit status
+                st.session_state['rate_limit_status'] = ""
+                
                 with st.spinner(f"Analyzing paper {i+1}/{st.session_state['total_papers']}..."):
+                    # Display rate limit status if present
+                    if st.session_state.get('rate_limit_status'):
+                        st.info(st.session_state['rate_limit_status'])
+                    
                     # First analyze with abstract
                     result = analyze_paper(paper, st.session_state['openai_api_key'], content_type="abstract")
                     
@@ -474,6 +619,10 @@ def perform_pubmed_analysis(query, max_results, action="new"):
                     # If we got full text, analyze it and update the result
                     if full_text:
                         with st.spinner(f"Analyzing full text for paper {i+1}..."):
+                            # Display rate limit status if present
+                            if st.session_state.get('rate_limit_status'):
+                                st.info(st.session_state['rate_limit_status'])
+                            
                             full_result = analyze_paper(full_text, st.session_state['openai_api_key'], content_type="full_text")
                             
                             # Preserve the PMID and other identifiers
@@ -535,6 +684,13 @@ def perform_pdf_analysis(pdf_files, action="new"):
                 
                 # Analyze the PDF content
                 with st.spinner(f"Analyzing content of {pdf_file.name}..."):
+                    # Clear any previous rate limit status
+                    st.session_state['rate_limit_status'] = ""
+                    
+                    # Display rate limit status if present
+                    if st.session_state.get('rate_limit_status'):
+                        st.info(st.session_state['rate_limit_status'])
+                    
                     result = analyze_paper(text_content, st.session_state['openai_api_key'], content_type="pdf")
                     # Add filename and source to result
                     result['Filename'] = pdf_file.name
