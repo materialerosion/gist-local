@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 # Rate limiting configuration
 RATE_LIMIT_CONFIG = {
     'max_retries': 5,
-    'min_wait_time': 30  # seconds
+    'min_wait_time': 30, # seconds
     'max_wait_time': 60,  # seconds
     'exponential_multiplier': 1,
     'extra_rate_limit_delay': 2  # additional seconds for rate limit errors
