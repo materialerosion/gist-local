@@ -89,6 +89,18 @@ def reset_app_state():
 # Sidebar for Inputs
 st.sidebar.header("GIST - Generative Insights Summarization Tool")
 
+# Quick Start Guide dropdown
+with st.sidebar.expander("📖 Quick Start Guide"):
+    st.markdown("[**🎥 Video Tutorial:**](https://bayergroup.sharepoint.com/:v:/s/LunchandLearnAIandMachineLearning/ER0KU7d2p1NFrrxHqnWUqwEBQsJny-oDDaJulvx3bnj7Vw?e=NxDBdF)")
+    
+    st.markdown("**📋 How to Use:**")
+    st.markdown("""
+    1. Enter search terms 
+    2. Click ✨ **GIST Analysis**
+    3. Download Results: Export findings to Excel format
+    """)
+
+
 # Tab selection
 tab_selection = st.sidebar.radio("Select Source", ["PubMed Search", "PDF Upload"])
 
