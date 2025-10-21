@@ -77,6 +77,17 @@ def call_openai_with_retry(client, **kwargs):
             time.sleep(RATE_LIMIT_CONFIG['extra_rate_limit_delay'])
             raise e  # Re-raise to trigger retry
         
+        # Check for budget/quota exhaustion (don't retry, mark for manual key entry)
+        elif any(budget_error in error_message for budget_error in [
+            'quota exceeded', 'billing', 'payment', 'insufficient funds', 
+            'budget exceeded', 'usage limit', 'account suspended'
+        ]):
+            logger.error(f"Budget/quota exhausted: {e}")
+            st.session_state['budget_exhausted'] = True
+            st.session_state['manual_key_entry_needed'] = True
+            st.session_state['api_key_valid'] = False
+            raise e  # Don't retry, let user handle manually
+        
         # Check for server errors that should be retried
         elif any(server_error in error_message for server_error in [
             '500', '502', '503', '504', 'internal server error', 
@@ -149,8 +160,14 @@ if 'full_query' not in st.session_state:
     st.session_state['full_query'] = ""
 if 'unlimited_search' not in st.session_state:
     st.session_state['unlimited_search'] = False
+if 'manual_key_entry_needed' not in st.session_state:
+    st.session_state['manual_key_entry_needed'] = False
+if 'budget_exhausted' not in st.session_state:
+    st.session_state['budget_exhausted'] = False
 if 'rate_limit_status' not in st.session_state:
     st.session_state['rate_limit_status'] = ""
+if 'user_budget_info' not in st.session_state:
+    st.session_state['user_budget_info'] = None
 
 # Function to reset the app state
 def reset_app_state():
@@ -170,6 +187,49 @@ def reset_app_state():
     st.session_state['unlimited_search'] = False
     st.session_state['rate_limit_status'] = ""
 
+# Helper functions for API key management (defined early so sidebar can use them)
+def reset_api_key_state():
+    """Reset API key state to force manual entry"""
+    st.session_state['api_key_valid'] = False
+    st.session_state['openai_api_key'] = None
+    st.session_state['manual_key_entry_needed'] = True
+    st.session_state['budget_exhausted'] = False
+
+def validate_api_key(api_key):
+    """Validate an API key by making a test request and check budget status"""
+    try:
+        headers = {
+            'accept': 'application/json',
+            'Authorization': f'Bearer {api_key}'
+        }
+        response = requests.get('https://chat.int.bayer.com/api/v2/users/me', headers=headers)
+        response.raise_for_status()
+        
+        # Parse response to check budget
+        user_data = response.json()
+        accumulated_cost = user_data.get('accumulated_cost', 0)
+        total_budget = user_data.get('total_budget', 0)
+        
+        # Store budget info in session state
+        st.session_state['user_budget_info'] = {
+            'accumulated_cost': accumulated_cost,
+            'total_budget': total_budget,
+            'remaining_budget': total_budget - accumulated_cost,
+            'user_name': user_data.get('full_name', 'Unknown'),
+            'email': user_data.get('email', 'Unknown')
+        }
+        
+        # Check if budget is exhausted or close to exhaustion
+        if accumulated_cost >= total_budget:
+            return False, f"Budget exhausted: ${accumulated_cost:.2f} of ${total_budget:.2f} used"
+        elif (total_budget - accumulated_cost) < 1.0:  # Less than $1 remaining
+            return True, f"⚠️ Low budget warning: Only ${total_budget - accumulated_cost:.2f} remaining"
+        else:
+            return True, f"API key valid. Budget: ${accumulated_cost:.2f} of ${total_budget:.2f} used"
+            
+    except requests.exceptions.RequestException as e:
+        return False, f"API key validation failed: {str(e)}"
+
 # Sidebar for Inputs
 st.sidebar.header("GIST - Generative Insights Summarization Tool")
 
@@ -187,49 +247,93 @@ with st.sidebar.expander("📖 Quick Start Guide"):
 # Tab selection
 tab_selection = st.sidebar.radio("Select Source", ["PubMed Search", "PDF Upload"])
 
-# OpenAI API Key Input in Sidebar - Now in background
+# OpenAI API Key Input in Sidebar - Enhanced with manual entry options
 with st.sidebar:
-    # Try to authenticate in the background
-    if not st.session_state['api_key_valid']:
+    st.markdown("### 🔑 API Key Management")
+    
+    # Show budget exhaustion warning if applicable
+    if st.session_state['budget_exhausted']:
+        st.error("⚠️ Budget/quota exhausted! Please enter a new API key below.")
+    
+    # Always show manual key entry option
+    with st.expander("Manual API Key Entry", expanded=st.session_state['manual_key_entry_needed']):
+        manual_key = st.text_input(
+            "Enter your API key:", 
+            type="password", 
+            key="manual_api_key_input",
+            help="This will override any existing API key configuration"
+        )
+        
+        if st.button("Validate Manual Key"):
+            if manual_key:
+                st.session_state['openai_api_key'] = manual_key
+                is_valid, message = validate_api_key(manual_key)
+                if is_valid:
+                    st.session_state['api_key_valid'] = True
+                    st.session_state['manual_key_entry_needed'] = False
+                    st.session_state['budget_exhausted'] = False
+                    st.success("✅ Manual API Key Validated Successfully!")
+                    st.rerun()
+                else:
+                    st.error(f"❌ {message}")
+                    st.session_state['api_key_valid'] = False
+            else:
+                st.warning("Please enter an API key to validate.")
+    
+    # Try to authenticate in the background (only if manual key not being used)
+    if not st.session_state['api_key_valid'] and not st.session_state['manual_key_entry_needed']:
         try:
             # Get API key from secrets
             openai_api_key = st.secrets["MGA_key"]
             st.session_state['openai_api_key'] = openai_api_key
 
-            # Validate API Key silently
-            headers = {
-                'accept': 'application/json',
-                'x-baychatgpt-accesstoken': openai_api_key
-            }
-            response = requests.get('https://chat.int.bayer.com/api/v2/users/me', headers=headers)
-            response.raise_for_status()
-            st.session_state['api_key_valid'] = True
-            # No success message displayed
+            # Validate API Key silently using the new validation function
+            is_valid, message = validate_api_key(openai_api_key)
+            if is_valid:
+                st.session_state['api_key_valid'] = True
+                # No success message displayed for automatic validation
+            else:
+                st.warning(f"🔐 {message}")
+                st.session_state['manual_key_entry_needed'] = True
         except KeyError as e:
             # If the key is not found in secrets
-            error_message = f"API Key 'MGA_key' not found in secrets. Please enter manually:"
-            openai_api_key = st.text_input(error_message, type="password")
-        except requests.exceptions.RequestException as e:
-            # If API validation fails
-            error_message = f"API Key validation failed: {str(e)}. Please enter a valid key:"
-            openai_api_key = st.text_input(error_message, type="password")
+            st.warning("🔐 API Key 'MGA_key' not found in secrets.")
+            st.session_state['manual_key_entry_needed'] = True
+        except Exception as e:
+            # If any other error occurs
+            st.warning(f"🔐 API Key validation error: {str(e)}")
+            st.session_state['manual_key_entry_needed'] = True
+    
+    # Show current status
+    if st.session_state['api_key_valid']:
+        st.success("✅ API Key is valid and ready!")
+        key_source = "Manual" if st.session_state.get('manual_key_entry_needed', False) else "Secrets"
+        st.caption(f"📝 Key source: {key_source}")
+        
+        # Show budget information if available
+        if st.session_state['user_budget_info']:
+            budget_info = st.session_state['user_budget_info']
+            remaining = budget_info['remaining_budget']
+            total = budget_info['total_budget']
+            used = budget_info['accumulated_cost']
             
-            if openai_api_key:
-                st.session_state['openai_api_key'] = openai_api_key
+            # Format budget strings cleanly to avoid font rendering issues
+            budget_text = f"Budget: {used:.2f} out of {total:.2f} USD"
+            remaining_text = f"{remaining:.2f} USD remaining"
+            
+            # Color code based on remaining budget
+            if remaining <= 0:
+                st.error(f"💰 {budget_text} (EXHAUSTED)")
+            elif remaining < 1.0:
+                st.warning(f"💰 {budget_text} ({remaining_text})")
+            else:
+                st.info(f"💰 {budget_text} ({remaining_text})")
                 
-                # Validate manually entered API Key
-                try:
-                    headers = {
-                        'accept': 'application/json',
-                        'x-baychatgpt-accesstoken': openai_api_key
-                    }
-                    response = requests.get('https://chat.int.bayer.com/api/v2/users/me', headers=headers)
-                    response.raise_for_status()
-                    st.session_state['api_key_valid'] = True
-                    st.success("API Key Validated! :white_check_mark:")
-                except requests.exceptions.RequestException as e:
-                    st.error(f"API Key Invalid: {e}")
-                    st.session_state['api_key_valid'] = False
+            st.caption(f"👤 User: {budget_info['user_name']}")
+    elif st.session_state['manual_key_entry_needed']:
+        st.info("ℹ️ Manual API key entry required")
+    else:
+        st.warning("⚠️ API key validation pending...")
 
     # Disable the analysis buttons if the API key is not provided or invalid
     start_analysis_disabled = not (st.session_state['openai_api_key'] and st.session_state['api_key_valid'])
@@ -437,8 +541,20 @@ def analyze_paper(paper, openai_api_key, content_type="abstract"):
         return json.loads(cleaned_str)
     
     except Exception as e:
-        # If all retries fail, return an error result
-        error_message = f"OpenAI API error after retries: {str(e)}"
+        # Check if this is a budget/quota issue
+        error_message_lower = str(e).lower()
+        if any(budget_error in error_message_lower for budget_error in [
+            'quota exceeded', 'billing', 'payment', 'insufficient funds', 
+            'budget exceeded', 'usage limit', 'account suspended'
+        ]):
+            # Mark that manual key entry is needed
+            st.session_state['budget_exhausted'] = True
+            st.session_state['manual_key_entry_needed'] = True
+            st.session_state['api_key_valid'] = False
+            error_message = f"Budget/quota exhausted: {str(e)}. Please enter a new API key in the sidebar."
+        else:
+            error_message = f"OpenAI API error after retries: {str(e)}"
+        
         logger.error(error_message)
         
         # Return a structured error response
@@ -710,6 +826,12 @@ def perform_pdf_analysis(pdf_files, action="new"):
 if tab_selection == "PubMed Search":
     st.title("PubMed Clinical Trial Analysis")
     
+    # Budget/quota status indicator
+    if st.session_state['budget_exhausted']:
+        st.error("⚠️ **Budget/Quota Exhausted!** Please enter a new API key in the sidebar to continue.")
+    elif st.session_state['manual_key_entry_needed']:
+        st.warning("🔐 **Manual API Key Required** - Please check the sidebar for API key configuration.")
+    
     # PubMed search parameters
     col1, col2 = st.columns([3, 1])
     with col1:
@@ -762,6 +884,12 @@ if tab_selection == "PubMed Search":
 
 elif tab_selection == "PDF Upload":
     st.title("Clinical Trial PDF Analysis")
+    
+    # Budget/quota status indicator
+    if st.session_state['budget_exhausted']:
+        st.error("⚠️ **Budget/Quota Exhausted!** Please enter a new API key in the sidebar to continue.")
+    elif st.session_state['manual_key_entry_needed']:
+        st.warning("🔐 **Manual API Key Required** - Please check the sidebar for API key configuration.")
     
     # Multiple file uploader
     pdf_files = st.file_uploader("Upload Clinical Trial PDF(s)", type=['pdf'], accept_multiple_files=True)
