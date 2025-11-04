@@ -233,23 +233,30 @@ def validate_api_key(api_key):
 # Sidebar for Inputs
 st.sidebar.header("GIST - Generative Insights Summarization Tool")
 
+# Tab selection
+tab_selection = st.sidebar.radio("Select Source", ["PubMed Search", "PDF Upload"])
+
+# Clear Results Button
+st.sidebar.markdown("---")
+if st.sidebar.button("Clear Results Table"):
+    st.session_state['show_clear_confirmation'] = True
+
 # Quick Start Guide dropdown
-with st.sidebar.expander("📖 Quick Start Guide"):
-    st.markdown("[**🎥 Video Tutorial:**](https://bayergroup.sharepoint.com/:v:/s/LunchandLearnAIandMachineLearning/ER0KU7d2p1NFrrxHqnWUqwEBQsJny-oDDaJulvx3bnj7Vw?e=NxDBdF)")
+st.sidebar.markdown("---")
+with st.sidebar.expander("Quick Start Guide"):
+    st.markdown("[**Video Tutorial:**](https://bayergroup.sharepoint.com/:v:/s/LunchandLearnAIandMachineLearning/ER0KU7d2p1NFrrxHqnWUqwEBQsJny-oDDaJulvx3bnj7Vw?e=NxDBdF)")
     
-    st.markdown("**📋 How to Use:**")
+    st.markdown("**How to Use:**")
     st.markdown("""
     1. Enter search terms 
     2. Click ✨ **GIST Analysis**
     3. Download Results: Export findings to Excel format
     """)
 
-# Tab selection
-tab_selection = st.sidebar.radio("Select Source", ["PubMed Search", "PDF Upload"])
-
 # OpenAI API Key Input in Sidebar - Enhanced with manual entry options
+st.sidebar.markdown("---")
 with st.sidebar:
-    st.markdown("### 🔑 API Key Management")
+    st.markdown("### API Key Management")
     
     # Show budget exhaustion warning if applicable
     if st.session_state['budget_exhausted']:
@@ -338,10 +345,9 @@ with st.sidebar:
     # Disable the analysis buttons if the API key is not provided or invalid
     start_analysis_disabled = not (st.session_state['openai_api_key'] and st.session_state['api_key_valid'])
     
-    # Add a clear table button in the sidebar
-    st.sidebar.markdown("---")
-    if st.sidebar.button("Clear Results Table"):
-        st.session_state['show_clear_confirmation'] = True
+    # Confirmation dialog for clear table button (if needed)
+    if st.session_state['show_clear_confirmation']:
+        pass  # The confirmation dialog will be handled in the next section
 
 # Show confirmation popup for clearing the table
 if st.session_state['show_clear_confirmation']:
