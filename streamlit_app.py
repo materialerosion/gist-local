@@ -470,7 +470,16 @@ def add_to_excel(output_list, excel_file_path, full_query=""):
     
     # Add the table to the worksheet
     ws.add_table(tab)
-    
+
+    # Add AI disclaimer at the bottom of the results
+    disclaimer_row = len(df) + 3  # Skip a row after the table
+    disclaimer_text = "Notice: Results are AI-generated. Please verify findings with primary sources."
+    ws.cell(row=disclaimer_row, column=1, value=disclaimer_text)
+    ws.merge_cells(start_row=disclaimer_row, start_column=1, end_row=disclaimer_row, end_column=len(df.columns))
+    disclaimer_cell = ws.cell(row=disclaimer_row, column=1)
+    disclaimer_cell.alignment = Alignment(horizontal='left', vertical='center')
+    disclaimer_cell.font = Font(italic=True, size=9)
+
     # Save the formatted workbook
     wb.save(excel_file_path)
     
@@ -832,6 +841,9 @@ def perform_pdf_analysis(pdf_files, action="new"):
 if tab_selection == "PubMed Search":
     st.title("PubMed Clinical Trial Analysis")
     
+    # Add AI disclaimer above the search
+    st.caption("🛈 AI Notice: Results are AI-generated. Please verify findings with primary sources.")
+    
     # Budget/quota status indicator
     if st.session_state['budget_exhausted']:
         st.error("⚠️ **Budget/Quota Exhausted!** Please enter a new API key in the sidebar to continue.")
@@ -845,9 +857,11 @@ if tab_selection == "PubMed Search":
     with col2:
         max_results = st.number_input("Max Results", min_value=1, max_value=400, value=2, step=1)
     
-    # Configure file name
+    # Configure file name - sanitize query to remove invalid filename characters
     query_word = query.split()[0]  # Extract the first word from the query
-    filename = f"Results {query_word} {time.strftime('%y%m%d')}.xlsx"
+    # Remove or replace invalid filename characters: < > : " / \ | ? * [ ]
+    query_word = re.sub(r'[<>:"/\\|?*\[\]]', '_', query_word)
+    filename = f"Results_{query_word}_{time.strftime('%y%m%d')}.xlsx"
     
     # Get paper count for both buttons
     paper_count = get_pubmed_count(query)
@@ -1017,6 +1031,8 @@ if st.session_state['search_completed']:
         # File naming based on source
         if tab_selection == "PubMed Search":
             query_word = query.split()[0] if query else "search"
+            # Remove or replace invalid filename characters: < > : " / \ | ? * [ ]
+            query_word = re.sub(r'[<>:"/\\|?*\[\]]', '_', query_word)
             filename = f"PubMed_{query_word}_{time.strftime('%y%m%d')}.xlsx"
         else:
             filename = f"PDF_Analysis_{time.strftime('%y%m%d')}.xlsx"
