@@ -22,7 +22,7 @@ jobs:
       - name: Set up Python version
         uses: actions/setup-python@v5
         with:
-          python-version: '3.13.5'
+          python-version: '3.10'
 
       - name: Create and start virtual environment
         run: |
@@ -37,15 +37,13 @@ jobs:
 
       - name: Set up environment variables
         run: |
-          cat > .env << EOL
-          NCBI_EMAIL=${{ secrets.NCBI_EMAIL }}
-          PM_KEY=${{ secrets.PM_KEY }}
-          MGA_KEY=${{ secrets.MGA }}
-          EOL
+          echo "NCBI_EMAIL=${{ secrets.NCBI_EMAIL }}" > .env
+          echo "PM_KEY=${{ secrets.PM_KEY }}" >> .env
+          echo "MGA_KEY=${{ secrets.MGA }}" >> .env
       # Optional: Add step to run tests here (PyTest, Django test suites, etc.)
 
       - name: Zip artifact for deployment
-        run: zip -r release.zip ./*
+        run: zip -r release.zip ./* -x 'venv/*'
 
       - name: Upload artifact for deployment jobs
         uses: actions/upload-artifact@v4
