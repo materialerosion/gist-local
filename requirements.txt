@@ -3,8 +3,11 @@ pandas
 openai
 biopython
 requests
-PyPDF2==3.0.1
-openpyxl==3.1.2
-zipfile36==0.1.3
+pypdf>=4.0
+pdf2image>=1.16.3
+pytesseract>=0.3.10
+Pillow>=10.2.0
+openpyxl>=3.1.2
+tenacity
 msal
-tenacity==8.2.3
+python-dotenv

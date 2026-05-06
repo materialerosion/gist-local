@@ -5,6 +5,7 @@ import time
 import os
 import io
 import zipfile
+from dotenv import load_dotenv
 from openai import OpenAI
 from datetime import datetime
 from Bio import Entrez
@@ -17,6 +18,9 @@ from openpyxl.worksheet.table import Table, TableStyleInfo
 import xml.etree.ElementTree as ET
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 import logging
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Configure logging for rate limiting
 logging.basicConfig(level=logging.INFO)
@@ -290,8 +294,10 @@ with st.sidebar:
     # Try to authenticate in the background (only if manual key not being used)
     if not st.session_state['api_key_valid'] and not st.session_state['manual_key_entry_needed']:
         try:
-            # Get API key from secrets
-            openai_api_key = st.secrets["MGA_key"]
+            # Get API key from environment variables (.env file)
+            openai_api_key = os.environ.get("MGA_KEY")
+            if not openai_api_key:
+                raise KeyError("MGA_KEY not found in environment variables")
             st.session_state['openai_api_key'] = openai_api_key
 
             # Validate API Key silently using the new validation function
@@ -303,8 +309,8 @@ with st.sidebar:
                 st.warning(f"🔐 {message}")
                 st.session_state['manual_key_entry_needed'] = True
         except KeyError as e:
-            # If the key is not found in secrets
-            st.warning("🔐 API Key 'MGA_key' not found in secrets.")
+            # If the key is not found in environment variables
+            st.warning("🔐 API Key 'MGA_KEY' not found in .env file.")
             st.session_state['manual_key_entry_needed'] = True
         except Exception as e:
             # If any other error occurs
@@ -314,7 +320,7 @@ with st.sidebar:
     # Show current status
     if st.session_state['api_key_valid']:
         st.success("✅ API Key is valid and ready!")
-        key_source = "Manual" if st.session_state.get('manual_key_entry_needed', False) else "Secrets"
+        key_source = "Manual" if st.session_state.get('manual_key_entry_needed', False) else "Environment"
         st.caption(f"📝 Key source: {key_source}")
         
         # Show budget information if available
@@ -361,11 +367,13 @@ if st.session_state['show_clear_confirmation']:
             st.session_state['show_clear_confirmation'] = False
             st.rerun()
 
-# Configure NCBI Search
-if "ncbi_email" in st.secrets:
-    Entrez.email = st.secrets["ncbi_email"]
-if "PM_Key" in st.secrets:
-    Entrez.api_key = st.secrets["PM_Key"]
+# Configure NCBI Search from environment variables (.env file)
+ncbi_email = os.environ.get("NCBI_EMAIL")
+if ncbi_email:
+    Entrez.email = ncbi_email
+pm_key = os.environ.get("PM_KEY")
+if pm_key:
+    Entrez.api_key = pm_key
 
 # Functions
 def get_pubmed_count(query):
@@ -539,7 +547,7 @@ def analyze_paper(paper, openai_api_key, content_type="abstract"):
         # Use the rate-limited API call function
         conversation = call_openai_with_retry(
             client,
-            model='gpt-4o-mini',  # Use appropriate model
+            model='ptu-latest',  # Use appropriate model
             messages=[
                 {
                     "role": "system",

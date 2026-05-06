@@ -38,7 +38,7 @@ This Streamlit application allows you to search PubMed for relevant research art
 
 ## Prerequisites
 
-*   **Python 3.7+**
+*   **Python 3.13+**
 *   **Streamlit:** `pip install streamlit`
 *   **Pandas:** `pip install pandas`
 *   **Biopython:** `pip install biopython`
@@ -57,25 +57,27 @@ This Streamlit application allows you to search PubMed for relevant research art
 2.  **Install the required packages:**
 
     ```bash
-    pip install streamlit pandas biopython openai requests
+    pip install -r requirements.txt
     ```
 
-3.  **Configure NCBI API Key:**
+3.  **Configure environment variables:**
 
-    *   Create a file named `.streamlit/secrets.toml` in your project directory.
-    *   Add your NCBI email and API key to the file:
+    *   Copy the `.env.example` file to `.env` in your project directory:
 
-        ```toml
-        ncbi_email = "your_email@example.com"
-        PM_Key = "YOUR_NCBI_API_KEY"
+        ```bash
+        cp .env.example .env
         ```
 
-    *   You can obtain an NCBI API key from [NCBI](https://www.ncbi.nlm.nih.gov/account/settings/). This is optional but highly recommended to avoid rate limiting.
+    *   Edit the `.env` file and add your API keys:
 
-4.  **Configure OpenAI API Key:**
+        ```
+        NCBI_EMAIL=your_email@example.com
+        PM_KEY=your_pubmed_api_key
+        MGA_KEY=your_mga_api_key
+        ```
 
-    *   This tool is designed to use a custom OpenAI endpoint. You'll need an API key that works with `https://chat.int.bayer.com/api/v1`.
-    *   The application will prompt you for your OpenAI API key in the sidebar.
+    *   **NCBI_EMAIL / PM_KEY:** You can obtain an NCBI API key from [NCBI](https://www.ncbi.nlm.nih.gov/account/settings/). This is optional but highly recommended to avoid rate limiting.
+    *   **MGA_KEY:** This tool uses a custom OpenAI endpoint (`https://chat.int.bayer.com/api/v2`). You can also enter your API key manually in the sidebar.
 
 ## Usage
 

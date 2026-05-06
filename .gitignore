@@ -1,5 +1,3 @@
-.streamlit/secrets.toml
-
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -167,4 +165,3 @@ cython_debug/
 #.idea/
 embase_test.py
 gist.md
-*.pdf

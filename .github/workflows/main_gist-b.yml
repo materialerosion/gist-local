@@ -22,7 +22,7 @@ jobs:
       - name: Set up Python version
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.13.5'
 
       - name: Create and start virtual environment
         run: |
@@ -35,18 +35,17 @@ jobs:
       - name: Make run.sh executable
         run: chmod +x run.sh     
 
-      - name: Set up Streamlit secrets
+      - name: Set up environment variables
         run: |
-          mkdir -p .streamlit
-          cat > .streamlit/secrets.toml << 'EOL'
-          ncbi_email = "${{ secrets.NCBI_EMAIL }}"
-          PM_Key = "${{ secrets.PM_KEY }}"
-          MGA_key = "${{ secrets.MGA }}"
+          cat > .env << EOL
+          NCBI_EMAIL=${{ secrets.NCBI_EMAIL }}
+          PM_KEY=${{ secrets.PM_KEY }}
+          MGA_KEY=${{ secrets.MGA }}
           EOL
       # Optional: Add step to run tests here (PyTest, Django test suites, etc.)
 
       - name: Zip artifact for deployment
-        run: zip -r release.zip ./* ./.streamlit
+        run: zip -r release.zip ./*
 
       - name: Upload artifact for deployment jobs
         uses: actions/upload-artifact@v4
