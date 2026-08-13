@@ -11,3 +11,4 @@ openpyxl>=3.1.2
 tenacity
 msal
 python-dotenv
+pypdf2
